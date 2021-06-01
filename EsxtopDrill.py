@@ -1,237 +1,144 @@
-from fault_finder import *
-from ploting_ops import *
+import logging
+import os
+import time
+
+import numpy as np
+import pandas as pd
+
+from filters_ops import filer_counter_group
+
+logfile = "./data/logs/esxtopdrill.log"
+logging.basicConfig(filename=logfile, level=logging.INFO, format='%(asctime)-15s %(message)s')
 
 
-class EsxtopDrill(wx.Frame):
-    c_sel_list = ['Not Set', 'Select Counter Group']
-    plt_sel_list = ['Not Set', 'Select Counter']
-    cg_list = ['Not Set', 'Load a Csv']
-    tmp_df_cg_filtered = pd.DataFrame()
-    tmp_df_c_filtered = pd.DataFrame()
-    object_filtered_data_frame = pd.DataFrame()
-    working_dir = ""
+class EsxtopDrill():
+    def __init__(self, csvfile=None, id=None, dropSysObjects=False):
+        if not csvfile:
+            logging.error("ERROR: CSV file not provided")
+            exit()
+        if not id:
+            self.id = int(time.time())
+        else:
+            self.id = id
+        self.working_dir = "./data/" + str(self.id) + "/"
+        if not (os.path.exists(self.working_dir)):
+            os.makedirs(self.working_dir)
+        self.csvfile = self.working_dir + csvfile
+        self.inputDF = self.load_csv()
+        if dropSysObjects:
+            self.inputDF = self.drop_sys_obj()
+        self.counterGroups = self.get_counterGroupsList()
+        self.prep_working_dir()
+        self.counters = {}
 
-    def __init__(self):
-
-        wx.Frame.__init__(self, None, title="Esxtop Drill", size=(600, 340))
-        panel = wx.Panel(self)
-        vbox = wx.BoxSizer(wx.VERTICAL)
-
-        self.label = wx.StaticText(panel, label='Waiting on user action')
-        self.label.SetForegroundColour((0, 0, 255))  # set text color
-        vbox.Add(self.label, 2, wx.ALL, 5)
-
-        self.btn_faultfinder = wx.Button(panel, -1, "Fault Finder")
-        vbox.Add(self.btn_faultfinder, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-
-        self.label1 = wx.StaticText(panel, label="OR", style=wx.ALIGN_CENTRE)
-        vbox.Add(self.label1, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-
-        chlbl = wx.StaticText(panel, label="Counter Groups", style=wx.ALIGN_CENTRE)
-        vbox.Add(chlbl, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        self.choice = wx.Choice(panel, choices=self.cg_list)
-        vbox.Add(self.choice, 1, wx.EXPAND | wx.ALL, 5)
-
-        chlbl_1 = wx.StaticText(panel, label="Counters", style=wx.ALIGN_CENTRE)
-        vbox.Add(chlbl_1, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        self.choice_1 = wx.Choice(panel, choices=self.c_sel_list)
-        vbox.Add(self.choice_1, 1, wx.EXPAND | wx.ALL, 5)
-
-        chlbl_2 = wx.StaticText(panel, label="What would you like to plot", style=wx.ALIGN_CENTRE)
-        vbox.Add(chlbl_2, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        self.choice_2 = wx.Choice(panel, choices=self.plt_sel_list)
-        vbox.Add(self.choice_2, 1, wx.EXPAND | wx.ALL, 5)
-
-        hbox = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_selwdir = wx.Button(panel, -1, "Select Working Directory")
-        hbox.Add(self.btn_selwdir, 0, wx.ALIGN_CENTER)
-        self.btn_loadcsv = wx.Button(panel, -1, "Load CSV")
-        hbox.Add(self.btn_loadcsv, 0, wx.ALIGN_CENTER)
-        self.btn_dropsys = wx.Button(panel, -1, "Drop System objects")
-        hbox.Add(self.btn_dropsys, 0, wx.ALIGN_CENTER)
-        hbox.AddStretchSpacer()
-
-        vbox.Add(hbox, 1, wx.ALIGN_CENTER)
-        vbox.AddStretchSpacer()
-
-        self.choice.Bind(wx.EVT_CHOICE, self.onchoice)
-        self.choice_1.Bind(wx.EVT_CHOICE, self.onchoice_1)
-        self.choice_2.Bind(wx.EVT_CHOICE, self.onchoice_2)
-        self.btn_selwdir.Bind(wx.EVT_BUTTON, self.selwdir_onclick)
-        self.btn_loadcsv.Bind(wx.EVT_BUTTON, self.loadcsv_onclick)
-        self.btn_faultfinder.Bind(wx.EVT_BUTTON, self.faultfinder_onclick)
-        self.btn_dropsys.Bind(wx.EVT_BUTTON, self.dropsys_onclick)
-
-        panel.SetSizer(vbox)
-        self.Centre()
-        self.Show()
-
-    # -----------------------------------------------------------------------------------
-
-    def selwdir_onclick(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
-        self.update_working_dir()
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
-
-    def loadcsv_onclick(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
+    def load_csv(self) -> pd.DataFrame:
         try:
-            self.load_data()
-        except:
-            print(datetime.now(), 'Error Loading the CSV file')
-        self.choice.Clear()
-        self.choice.AppendItems(self.cg_list)
-        self.choice_1.Clear()
-        self.choice_2.Clear()
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
+            logging.info("Loading " + self.csvfile + " using Default encoding. This may take a while")
+            tdf = pd.DataFrame(pd.read_csv(self.csvfile))
+            logging.info("CSV file successfully loaded to Memory")
+            return tdf
+        except Exception as e:
+            errmsg = "file read error:" + str(e)
+            if "No such file or directory" in errmsg:
+                logging.error(errmsg)
+                exit()
+            if "Unable to allocate" in errmsg:
+                logging.error("File too big to load")
+                exit()
+        try:
+            logging.info("Loading " + self.csvfile + " using ISO-8859–1 encoding. This may take a while")
+            tdf = pd.DataFrame(pd.read_csv(self.csvfile, encoding='ISO-8859–1'))
+            logging.info("CSV file successfully loaded to Memory")
+            return tdf
+        except Exception as e:
+            errmsg = "File Read Error:" + str(e)
+            logging.error(errmsg)
+            if self.fix_file():
+                self.load_csv()
 
-    def faultfinder_onclick(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
-        if self.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            if self.object_filtered_data_frame.empty:
-                error("CVS File not Loaded")
-            else:
-                fault_finder(self.object_filtered_data_frame, self.working_dir)
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
+    def fix_file(self):
+        logging.info("Attempting to fix file structure")
+        numberoflines = 0
+        try:
+            file = open(self.csvfile, "r")
+            for line in file:
+                if line:
+                    numberoflines = numberoflines + 1
+            file.close()
+            file = open(self.csvfile, "r")
+            fixedfile = []
+            i = 0
+            numberoflines = numberoflines - 1
+            for line in file:
+                if i < numberoflines:
+                    fixedfile.append(line)
+                    i = i + 1
+            file.close()
+            file = open(self.csvfile, 'w')
+            file.writelines(fixedfile)
+            file.close()
+            logging.info("Fix success, please try to reload the file!")
+            return True
+        except Exception as e:
+            logging.error("Fix failure, please send this file to akalia@vmware.com for debugging" + str(e))
+            return False
 
-    def dropsys_onclick(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
-        if self.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            if self.object_filtered_data_frame.empty:
-                error("CVS File not Loaded")
-            else:
-                self.drop_sys(self.object_filtered_data_frame)
-                self.choice.Clear()
-                self.choice.AppendItems(self.cg_list)
-                self.choice_1.Clear()
-                self.choice_2.Clear()
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
+    def get_counterGroupsList(self):
+        col_name_df = pd.DataFrame(self.inputDF.columns)
+        c_gn_c_df = col_name_df[0].str.split(("\\"), expand=True)
+        cg_df = c_gn_c_df[3].str.split(("\("), expand=True)
+        c_gn_c_df[3] = cg_df[0]
+        counter_groups = pd.DataFrame(cg_df[0].unique())
+        counter_groups.columns = ['Counter Groups']
+        counter_groups = counter_groups.replace(to_replace='None', value=np.nan).dropna()
+        cg_list = counter_groups['Counter Groups'].tolist()
+        return cg_list
 
-    def onchoice(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
-        if self.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            if self.object_filtered_data_frame.empty:
-                error("CVS File not Loaded")
-            else:
-                cg_selection = self.choice.GetString(self.choice.GetSelection())
-                data_frame = filer_counter_group(self.object_filtered_data_frame, cg_selection, self.working_dir)
-                self.prep_counter_list(data_frame)
-                self.choice_1.Clear()
-                self.choice_1.AppendItems(self.c_sel_list)
-                self.update_tmp_df(data_frame, 'cg')
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
+    def prep_working_dir(self):
+        for i in self.counterGroups:
+            path = self.working_dir + str(i)
+            if not (os.path.exists(path)):
+                os.makedirs(path)
 
-    # -------------------------------------------------------------------------------------
-
-    def onchoice_1(self, event):
-        self.label.SetForegroundColour((255, 0, 0))
-        self.label.SetLabel('Processing')
-        if self.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            if self.object_filtered_data_frame.empty:
-                error("CVS File not Loaded")
-            else:
-                cg_selection = self.choice.GetString(self.choice.GetSelection())
-                c_selection = self.choice_1.GetString(self.choice_1.GetSelection())
-                data_frame = filer_counter(self.tmp_df_cg_filtered, c_selection, cg_selection, self.working_dir)
-                self.prep_plt_list(data_frame)
-                self.choice_2.Clear()
-                self.choice_2.AppendItems(self.plt_sel_list)
-                self.update_tmp_df(data_frame, 'c')
-        self.label.SetForegroundColour((0, 0, 255))
-        self.label.SetLabel('Waiting on user action')
-
-    # -------------------------------------------------------------------------------------
-
-    def onchoice_2(self, event):
-        if self.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            if self.object_filtered_data_frame.empty:
-                error("CVS File not Loaded")
-            else:
-                self.label.SetForegroundColour((255, 0, 0))
-                self.label.SetLabel('Processing')
-                data_frame = self.tmp_df_c_filtered
-                cg_selection = self.choice.GetString(self.choice.GetSelection())
-                plt_selection = self.choice_2.GetString(self.choice_2.GetSelection())
-                plotit(plt_selection, self.working_dir, data_frame, cg_selection)
-                self.label.SetForegroundColour((0, 0, 255))
-                self.label.SetLabel('Waiting on user action')
-
-    # -------------------------------------------------------------------------------------
-
-    @classmethod
-    def prep_counter_list(cls, cg_filtered_data_frame):
+    def get_counterList(self, counterGroup=None):
+        if not counterGroup:
+            logging.error("Counter Group is required to prepare counter list")
+        cg_filtered_data_frame = filer_counter_group(data_frame=self.inputDF, counter_group=counterGroup,
+                                                     working_dir=self.working_dir, persist_files=False)
         col_name_df = pd.DataFrame(cg_filtered_data_frame.columns)
         col_name_df = col_name_df.drop([0])
         col_name_df = col_name_df[0].str.split(("\\"), expand=True)
-        cls.c_sel_list = list(col_name_df[4].unique())
+        counterList = list(col_name_df[4].unique())
+        return counterList
 
-    # --------------------------------------------------------------------------------------
-    @classmethod
-    def prep_plt_list(cls, c_filtered_data_frame):
-        col_name_df = pd.DataFrame(c_filtered_data_frame.columns)
-        col_name_df = col_name_df.drop([0])
-        cls.plt_sel_list = list(col_name_df[0].unique())
-
-    # --------------------------------------------------------------------------------------
-    @classmethod
-    def update_tmp_df(cls, tmp_df, df_type):
-        if df_type == 'cg':
-            cls.tmp_df_cg_filtered = tmp_df
-        if df_type == 'c':
-            cls.tmp_df_c_filtered = tmp_df
-
-    @classmethod
-    def update_working_dir(cls):
-        working_dir = get_dir("Working directory")
-        cls.working_dir = working_dir
-        if not (cls.cg_list[0] == 'Not Set'):
-            prep_working_dir(cls.cg_list, cls.working_dir)
-
-    @classmethod
-    def load_data(cls):
-        if cls.working_dir == "":
-            error("Working Directory not Set")
-        else:
-            data = load_csv(read_csv_location())
-            if data is None:
-                raise ValueError('CSV read failure')
-            else:
-                data = filter_objects(cls.working_dir, data)
-                cls.object_filtered_data_frame = data
-                cg_selection = prep_cg_selection(data)
-                prep_working_dir(cg_selection, cls.working_dir)
-                cls.cg_list = cg_selection
-
-    @classmethod
-    def drop_sys(cls, data):
-        data = drop_sys_obj(data)
-        cls.object_filtered_data_frame = data
-
-    # --------------------------------------------------------------------------------------
+    def drop_sys_obj(self):
+        sys_obj = [
+            ':system', ':helper', ':drivers', ':ft', ':vmotion', ':init', ':vmsyslogd', ':sh', ':vobd',
+            ':vmkeventd',
+            ':vmkdevmgr', ':net-lacp', ':dhclient-uw', ':vmkiscsid', ':nfsgssd', ':busybox', ':ntpd',
+            ':vmware-usbarbitrator', ':ioFilterVPServer', ':swapobjd', ':storageRM', ':hostdCgiServer', ':sensord',
+            ':net-lbt', ':hostd', ':rhttpproxy', ':slpd', ':net-cdp', ':nscd', ':smartd', ':lwsmd', ':pktcap-agent',
+            ':netcpa', ':vdpi', ':logchannellogger', ':logger', ':dcui', ':vpxa', ':fdm', ':vsfwd', ':sfcbd',
+            ':sfcb-sfcb',
+            ':sfcb-ProviderMa', ':openwsmand', ':sshd', ':esxtop', ':gzip', ':sdrsInjector', ':timeout']
+        c_df = pd.DataFrame(self.inputDF.columns)
+        c_index_list = list()
+        for obj in sys_obj:
+            c_index_list.extend(c_df.index[c_df[0].str.contains(obj)].tolist())
+        c_name_list = list()
+        for c_index in c_index_list:
+            c_name = c_df.at[c_index, 0]
+            c_name_list.append(c_name)
+        out_df = self.inputDF.drop(c_name_list, axis=1)
+        logging.info('System objects dropped')
+        return out_df
 
 
-app = wx.App()
-EsxtopDrill()
-app.MainLoop()
-app.ExitMainLoop()
-exit()
+def main():
+    test = EsxtopDrill(csvfile="test.csv", id=1, dropSysObjects=False)
+    print(test.counterGroups)
+    print(test.get_counterList(counterGroup="Memory"))
+
+
+if __name__ == '__main__':
+    main()

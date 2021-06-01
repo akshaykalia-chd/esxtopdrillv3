@@ -1,4 +1,3 @@
-from file_dir_ops import *
 from filters_ops import *
 
 
@@ -6,7 +5,7 @@ def fault_finder(data_frame, working_dir):
     print(datetime.now(), ' Processing Started')
     c_map_df = pd.DataFrame(pd.read_csv('c_map.csv'))
     cg_selection = list(c_map_df['Counter_Group'].unique())
-    prep_working_dir(cg_selection, working_dir)
+    #prep_working_dir(cg_selection, working_dir)
     object_name = list()
     counter_name = list()
     average = list()
@@ -240,4 +239,3 @@ def fault_finder(data_frame, working_dir):
     outfile = os.path.join(working_dir, outfile)
     out_df.to_csv(outfile, index=False)
     print(datetime.now(), ' Done processing, please review %s' % outfile)
-    dialog('Done processing for faults, please review %s' % outfile)
